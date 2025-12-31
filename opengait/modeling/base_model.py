@@ -21,6 +21,7 @@ from torch.cuda.amp import autocast
 from torch.cuda.amp import GradScaler
 from abc import ABCMeta
 from abc import abstractmethod
+from modeling import models
 
 from . import backbones
 from .loss_aggregator import LossAggregator
@@ -29,7 +30,7 @@ from data.collate_fn import CollateFn
 from data.dataset import DataSet
 import data.sampler as Samplers
 from utils import Odict, mkdir, ddp_all_gather
-from utils import get_valid_args, is_list, is_dict, np2var, ts2np, list2var, get_attr_from
+from utils import get_valid_args, is_list, is_dict, np2var, ts2np, list2var, get_attr_from, config_loader
 from evaluation import evaluator as eval_functions
 from utils import NoOp
 from utils import get_msg_mgr
@@ -117,7 +118,7 @@ class BaseModel(MetaModel, nn.Module):
 
     """
 
-    def __init__(self, cfgs, training):
+    def __init__(self, cfgs, training, is_teacher=False):
         """Initialize the base model.
 
         Complete the model initialization, including the data loader, the network, the optimizer, the scheduler, the loss.
@@ -143,32 +144,49 @@ class BaseModel(MetaModel, nn.Module):
                                   cfgs['model_cfg']['model'], self.engine_cfg['save_name'])
 
         self.build_network(cfgs['model_cfg'])
-        self.init_parameters()
-        self.trainer_trfs = get_transform(cfgs['trainer_cfg']['transform'])
+        if not is_teacher:
+            self.init_parameters()
+            self.trainer_trfs = get_transform(cfgs['trainer_cfg']['transform'])
 
-        self.msg_mgr.log_info(cfgs['data_cfg'])
-        if training:
-            self.train_loader = self.get_loader(
-                cfgs['data_cfg'], train=True)
-        if not training or self.engine_cfg['with_test']:
-            self.test_loader = self.get_loader(
-                cfgs['data_cfg'], train=False)
-            self.evaluator_trfs = get_transform(
-                cfgs['evaluator_cfg']['transform'])
+            self.msg_mgr.log_info(cfgs['data_cfg'])
+            if training:
+                self.train_loader = self.get_loader(
+                    cfgs['data_cfg'], train=True)
+            if not training or self.engine_cfg['with_test']:
+                self.test_loader = self.get_loader(
+                    cfgs['data_cfg'], train=False)
+                self.evaluator_trfs = get_transform(
+                    cfgs['evaluator_cfg']['transform'])
 
         self.device = torch.distributed.get_rank()
         torch.cuda.set_device(self.device)
         self.to(device=torch.device(
             "cuda", self.device))
 
-        if training:
+        if training and not is_teacher:
             self.loss_aggregator = LossAggregator(cfgs['loss_cfg'])
             self.optimizer = self.get_optimizer(self.cfgs['optimizer_cfg'])
             self.scheduler = self.get_scheduler(cfgs['scheduler_cfg'])
-        self.train(training)
+        self.train(training and not is_teacher)
         restore_hint = self.engine_cfg['restore_hint']
         if restore_hint != 0:
             self.resume_ckpt(restore_hint)
+
+        self.teacher_model = None
+        if not is_teacher:
+            teacher_cfg_path = cfgs['model_cfg'].get('teacher_cfg_path', None)
+            if teacher_cfg_path is not None:
+                self.teacher_cfg = config_loader(teacher_cfg_path)
+                self.msg_mgr.log_info(f'Loading teacher model from {teacher_cfg_path}')
+                self.teacher_model = self.build_teacher_model(self.teacher_cfg)
+
+    def build_teacher_model(self, teacher_cfg):
+        teacher_model_cfg = teacher_cfg['model_cfg']
+        TeacherModel = getattr(models, teacher_model_cfg['model'])
+        teacher_model = TeacherModel(teacher_cfg, training=False, is_teacher=True)
+        for p in teacher_model.parameters():
+            p.requires_grad = False
+        return teacher_model
 
     def get_backbone(self, backbone_cfg):
         """Get the backbone of the model."""
@@ -238,8 +256,11 @@ class BaseModel(MetaModel, nn.Module):
         if torch.distributed.get_rank() == 0:
             mkdir(osp.join(self.save_path, "checkpoints/"))
             save_name = self.engine_cfg['save_name']
+            # skip teacher model saving
+            state_dict = self.state_dict()
+            state_dict = {k: v for k, v in state_dict.items() if not 'teacher_model.' in k}
             checkpoint = {
-                'model': self.state_dict(),
+                'model': state_dict,
                 'optimizer': self.optimizer.state_dict(),
                 'scheduler': self.scheduler.state_dict(),
                 'iteration': iteration}
@@ -408,6 +429,40 @@ class BaseModel(MetaModel, nn.Module):
                 retval = model(ipts)
                 training_feat, visual_summary = retval['training_feat'], retval['visual_summary']
                 del retval
+                if model.teacher_model is not None:
+                    teacher = model.teacher_model
+                    teacher.eval() 
+
+                    with torch.no_grad():
+                        retval_t = teacher(ipts) 
+                    t_feat = retval_t['training_feat']
+                    del retval_t
+
+                    # student
+                    logits_s = training_feat['softmax']['logits']        # [N, num_cls, P]
+                    embed_s  = training_feat['triplet']['embeddings']    # [N, C, P]
+                    # teacher
+                    logits_t = t_feat['softmax']['logits']               # [N, num_cls, P]
+                    embed_t  = t_feat['triplet']['embeddings']           # [N, C, P]
+
+                    # labels
+                    labels = training_feat['softmax']['labels']            # [N]
+
+                    # parts number
+                    p_s = logits_s.shape[-1]
+                    p_t = logits_t.shape[-1]
+                    p_min = min(p_s, p_t)
+
+                    # KD Loss
+                    training_feat['kd_logits'] = {
+                        'logits_s': logits_s[:, :, :p_min],
+                        'logits_t': logits_t[:, :, :p_min],
+                        # 'labels': labels
+                    }
+                    training_feat['kd_feats'] = {
+                        'feats_s': embed_s[:, :, :p_min],
+                        'feats_t': embed_t[:, :, :p_min]
+                    }
             loss_sum, loss_info = model.loss_aggregator(training_feat)
             ok = model.train_step(loss_sum)
             if not ok:

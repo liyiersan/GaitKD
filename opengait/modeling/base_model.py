@@ -179,6 +179,7 @@ class BaseModel(MetaModel, nn.Module):
                 self.teacher_cfg = config_loader(teacher_cfg_path)
                 self.msg_mgr.log_info(f'Loading teacher model from {teacher_cfg_path}')
                 self.teacher_model = self.build_teacher_model(self.teacher_cfg)
+<<<<<<< HEAD
                 
         self.teacher_models = None
         if not is_teacher:
@@ -209,6 +210,16 @@ class BaseModel(MetaModel, nn.Module):
             teacher_models[name] = m
             self.msg_mgr.log_info(f"Teacher[{name}] loaded from {cfg_path}")
         return teacher_models
+=======
+
+    def build_teacher_model(self, teacher_cfg):
+        teacher_model_cfg = teacher_cfg['model_cfg']
+        TeacherModel = getattr(models, teacher_model_cfg['model'])
+        teacher_model = TeacherModel(teacher_cfg, training=False, is_teacher=True)
+        for p in teacher_model.parameters():
+            p.requires_grad = False
+        return teacher_model
+>>>>>>> origin/main
 
     def get_backbone(self, backbone_cfg):
         """Get the backbone of the model."""
@@ -451,6 +462,7 @@ class BaseModel(MetaModel, nn.Module):
                 retval = model(ipts)
                 training_feat, visual_summary = retval['training_feat'], retval['visual_summary']
                 del retval
+<<<<<<< HEAD
                 
                 if model.teacher_models is not None and len(model.teacher_models) > 0:
                     # student
@@ -487,6 +499,42 @@ class BaseModel(MetaModel, nn.Module):
                             }
                     
                     
+=======
+                if model.teacher_model is not None:
+                    teacher = model.teacher_model
+                    teacher.eval() 
+
+                    with torch.no_grad():
+                        retval_t = teacher(ipts) 
+                    t_feat = retval_t['training_feat']
+                    del retval_t
+
+                    # student
+                    logits_s = training_feat['softmax']['logits']        # [N, num_cls, P]
+                    embed_s  = training_feat['triplet']['embeddings']    # [N, C, P]
+                    # teacher
+                    logits_t = t_feat['softmax']['logits']               # [N, num_cls, P]
+                    embed_t  = t_feat['triplet']['embeddings']           # [N, C, P]
+
+                    # labels
+                    labels = training_feat['softmax']['labels']            # [N]
+
+                    # parts number
+                    p_s = logits_s.shape[-1]
+                    p_t = logits_t.shape[-1]
+                    p_min = min(p_s, p_t)
+
+                    # KD Loss
+                    training_feat['kd_logits'] = {
+                        'logits_s': logits_s[:, :, :p_min],
+                        'logits_t': logits_t[:, :, :p_min],
+                        # 'labels': labels
+                    }
+                    training_feat['kd_feats'] = {
+                        'feats_s': embed_s[:, :, :p_min],
+                        'feats_t': embed_t[:, :, :p_min]
+                    }
+>>>>>>> origin/main
             loss_sum, loss_info = model.loss_aggregator(training_feat)
             ok = model.train_step(loss_sum)
             if not ok:

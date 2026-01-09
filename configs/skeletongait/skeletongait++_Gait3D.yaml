@@ -1,6 +1,10 @@
 data_cfg:
   dataset_name: Gait3D
+<<<<<<< HEAD
   dataset_root: /home/zq/data/gait_data/Gait3D-multimodal
+=======
+  dataset_root: your_path
+>>>>>>> origin/main
   dataset_partition: ./datasets/Gait3D/Gait3D.json
   num_workers: 1
   data_in_use: [True, True] # heatmap, sil

@@ -201,5 +201,37 @@ def get_ddp_module(module, find_unused_parameters=False, **kwargs):
 
 
 def params_count(net):
-    n_parameters = sum(p.numel() for p in net.parameters())
-    return 'Parameters Count: {:.5f}M'.format(n_parameters / 1e6)
+    student_params = 0
+    teacher_params = {}
+    compression_ratios = {}
+
+    # Helper function to count parameters in a given model
+    def count_backbone_params(module):
+        count = 0
+        for name, p in module.named_parameters():
+            # Skip BNNeck parameters or teacher model parameters
+            if "BNNeck" in name or "teacher_models" in name:
+                continue
+            count += p.numel()
+        return count
+
+    # Count parameters of the main student model
+    student_params = count_backbone_params(net)
+
+    # Iterate through the teacher models and count their parameters
+    if hasattr(net, 'teacher_models') and net.teacher_models is not None:
+        for teacher_name, teacher_model in net.teacher_models.items():
+            teacher_param_count = count_backbone_params(teacher_model)
+            teacher_params[teacher_name] = teacher_param_count
+            # Calculate the compression ratio for each teacher
+            compression_ratios[teacher_name] = student_params / teacher_param_count if teacher_param_count > 0 else float('inf')
+
+    # Prepare the output string
+    output = f"Student: {student_params / 1e6:.3f}M | Teacher Models Parameters:"
+
+    # Print the teacher model params and compression ratios
+    for teacher_name, teacher_param_count in teacher_params.items():
+        ratio = compression_ratios[teacher_name]
+        output += f" {teacher_name}: {teacher_param_count / 1e6:.3f}M params, Compression Ratio: {ratio:.3f} |"
+
+    return output.rstrip('|')

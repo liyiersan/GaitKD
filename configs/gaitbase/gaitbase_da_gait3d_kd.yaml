@@ -1,8 +1,9 @@
 data_cfg:
   dataset_name: Gait3D
-  dataset_root: /home/zq/data/gait_data/Gait3D-silh-pkl-64 # /home/zq/data/gait_data/Gait3D-pkls/Gait3D-sils-64-44-pkl
+  dataset_root: /home/zq/data/gait_data/Gait3D-multimodal # /home/zq/data/gait_data/Gait3D-pkls/Gait3D-sils-64-44-pkl
   dataset_partition: ./datasets/Gait3D/Gait3D.json
   num_workers: 1
+  data_in_use: [True, True] # heatmap, sil
   remove_no_gallery: false # Remove probe if no gallery for it
   test_dataset_name: Gait3D
 
@@ -10,7 +11,7 @@ evaluator_cfg:
   enable_float16: true
   restore_ckpt_strict: true
   restore_hint: 60000
-  save_name: GaitBase_DA_KDLogits_KLLoss_w1.0_scale16_T4.0_FeatsKD_ABLoss_w0.003_feat_num1_margin1.0_Teacher_DeepGaitV2
+  save_name: GaitBase_DA_KDLogits_KLLoss_w1.0_scale16_T4.0_FeatsKD_ABLoss_w0.003_feat_num1_margin1.0_Teacher_DeepGaitV2_SkeletonGaitPP
   eval_func: evaluate_Gait3D
   sampler:
     batch_shuffle: false
@@ -35,12 +36,22 @@ loss_cfg:
     T: 4.0
     scale: 16
     type: LogitsKD_KLLoss
-    log_prefix: kd_logits
+    log_prefix: kd_logits_deepgaitv2
   - loss_term_weight: 0.003
     feat_num: 1
     margin: 1.0
     type: FeatsKD_ABLoss
-    log_prefix: kd_feats
+    log_prefix: kd_feats_deepgaitv2
+  - loss_term_weight: 1.0
+    T: 4.0
+    scale: 16
+    type: LogitsKD_KLLoss
+    log_prefix: kd_logits_SkeletonGaitPP
+  - loss_term_weight: 0.003
+    feat_num: 1
+    margin: 1.0
+    type: FeatsKD_ABLoss
+    log_prefix: kd_feats_SkeletonGaitPP
 
 model_cfg:
   model: Baseline
@@ -73,7 +84,13 @@ model_cfg:
     parts_num: 16
   bin_num:
     - 16
-  teacher_cfg_path: ./configs/deepgaitv2/DeepGaitV2_gait3d.yaml
+  teachers:
+    deepgaitv2:
+      cfg_path: ./configs/deepgaitv2/DeepGaitV2_gait3d.yaml
+    # swingait:
+    #   cfg_path: ./configs/swingait/swingait3D_B1442C2_Gait3D.yaml
+    SkeletonGaitPP:
+      cfg_path: ./configs/skeletongait/skeletongait++_Gait3D.yaml
 
 optimizer_cfg:
   lr: 0.1
@@ -95,8 +112,8 @@ trainer_cfg:
   log_iter: 100
   restore_ckpt_strict: true
   restore_hint: 0
-  save_iter: 10000
-  save_name: GaitBase_DA_KDLogits_KLLoss_w1.0_scale16_T4.0_FeatsKD_ABLoss_w0.003_feat_num1_margin1.0_Teacher_DeepGaitV2
+  save_iter: 20000
+  save_name: GaitBase_DA_KDLogits_KLLoss_w1.0_scale16_T4.0_FeatsKD_ABLoss_w0.003_feat_num1_margin1.0_Teacher_DeepGaitV2_SkeletonGaitPP
   sync_BN: true
   total_iter: 60000
   sampler:
@@ -104,10 +121,13 @@ trainer_cfg:
     batch_size:
       - 32 # TripletSampler, batch_size[0] indicates Number of Identity
       - 4 #                 batch_size[1] indicates Samples sequqnce for each Identity
+    # frames_num_fixed: 30 # fixed frames number for training
+    # frames_num_max: 50 # max frames number for unfixed training
+    # frames_num_min: 10 # min frames number for unfixed traing
+    # sample_type: unfixed_unordered # fixed control input frames number, unordered for controlling order of input tensor; Other options: unfixed_ordered or all_ordered
     frames_num_fixed: 30 # fixed frames number for training
-    frames_num_max: 50 # max frames number for unfixed training
-    frames_num_min: 10 # min frames number for unfixed traing
-    sample_type: unfixed_unordered # fixed control input frames number, unordered for controlling order of input tensor; Other options: unfixed_ordered or all_ordered
+    frames_skip_num: 4
+    sample_type: fixed_ordered # fixed control input frames number, unordered for controlling order of input tensor; Other options: unfixed_ordered or all_ordered
     type: TripletSampler
   transform:
     - type: Compose

@@ -90,6 +90,25 @@ class DeepGaitV2(BaseModel):
             )
         return nn.Sequential(*layers)
 
+    # uncomment if skeletonPP is teacher model  
+    def inputs_pretreament(self, inputs):
+       ### Ensure the same data augmentation for heatmap and silhouette
+       pose_sils = inputs[0]
+       if len(pose_sils) == 1:
+            return super().inputs_pretreament(inputs)
+       new_data_list = []
+       for pose, sil in zip(pose_sils[0], pose_sils[1]):
+           sil = sil[:, np.newaxis, ...] # [T, 1, H, W]
+           pose_h, pose_w = pose.shape[-2], pose.shape[-1]
+           sil_h, sil_w = sil.shape[-2], sil.shape[-1]
+           if sil_h != sil_w and pose_h == pose_w:
+               cutting = (sil_h - sil_w) // 2
+               pose = pose[..., cutting:-cutting]
+           cat_data = np.concatenate([pose, sil], axis=1) # [T, 3, H, W]
+           new_data_list.append(cat_data)
+       new_inputs = [[new_data_list], inputs[1], inputs[2], inputs[3], inputs[4]]
+       return super().inputs_pretreament(new_inputs)
+
     def forward(self, inputs):
         ipts, labs, typs, vies, seqL = inputs
         
@@ -100,6 +119,10 @@ class DeepGaitV2(BaseModel):
             sils = sils.transpose(1, 2).contiguous()
         assert sils.size(-1) in [44, 88]
 
+        if sils.shape[1] > 1: # more than 1 channel
+            # get last one
+            sils = sils[:, -1:, ...]
+        
         del ipts
         out0 = self.layer0(sils)
         out1 = self.layer1(out0)

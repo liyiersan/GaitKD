@@ -28,6 +28,11 @@ class FeatsKD_MSELoss(BaseLoss):
 
 
 class FeatsKD_ABLoss(BaseLoss):
+    """
+    "Frequency-Aligned Knowledge Distillation for Lightweight Spatiotemporal Forecasting"
+    https://arxiv.org/pdf/2507.02939.pdf
+    """
+    
     def __init__(self, feat_num=1, margin=1.0, loss_term_weight=1.0):
         super(FeatsKD_ABLoss, self).__init__(loss_term_weight)
         self.w = [2**(i-feat_num+1) for i in range(feat_num)]
@@ -66,6 +71,8 @@ class FeatsKD_ABLoss(BaseLoss):
 
 class FeatsKD_ATLoss(BaseLoss):
     """
+    "Paying More Attention To The Attention - Improving the Performance of CNNs via Attention Transfer"
+    https://arxiv.org/pdf/1612.03928.pdf
     Attention Transfer (AT) Loss adapted for gait.
     Supports features of shape:
       - [N, C, H, W]

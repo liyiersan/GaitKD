@@ -69,6 +69,8 @@ class SkeletonGaitPP(BaseModel):
    def inputs_pretreament(self, inputs):
        ### Ensure the same data augmentation for heatmap and silhouette
        pose_sils = inputs[0]
+       if len(pose_sils) == 1:
+            return super().inputs_pretreament(inputs)
        new_data_list = []
        for pose, sil in zip(pose_sils[0], pose_sils[1]):
            sil = sil[:, np.newaxis, ...] # [T, 1, H, W]

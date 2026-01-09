@@ -5,6 +5,9 @@ from .base import BaseLoss
 
 class LogitsKD_KLLoss(BaseLoss):
     """
+    "Distilling the Knowledge in a Neural Network" 
+    https://arxiv.org/pdf/1503.02531.pdf
+    
     分类任务用的 logits 蒸馏（KD）Loss，适配 gait 的 [N, C, P] 形式。
     用 KL-div + 温度 T，在类别维做 softmax。
     """
@@ -13,7 +16,7 @@ class LogitsKD_KLLoss(BaseLoss):
         self.T = T
         self.scale = scale  # 和 CrossEntropyLoss 一样保留一个缩放系数
 
-    def forward(self, logits_s, logits_t):
+    def forward(self, logits_s, logits_t, labels):
         """
         logits_s: [N, C, P]，student 的 logits
         logits_t: [N, C, P]，teacher 的 logits
@@ -38,6 +41,9 @@ class LogitsKD_KLLoss(BaseLoss):
 
 class LogitsKD_KA_PSLoss(BaseLoss):
     """
+    "Preparing Lessons: Improve Knowledge Distillation with Better Supervision"
+    https://arxiv.org/abs/1911.07471
+    
     KA + Probability Shift (PS) for logits distillation, for gait logits [N, C, P].
     If teacher predicts wrong, swap prob of predicted class and true class (on soft targets).
     """
@@ -97,7 +103,7 @@ class LogitsKD_MSELoss(BaseLoss):
         super(LogitsKD_MSELoss, self).__init__(loss_term_weight)
         self.scale = scale
 
-    def forward(self, logits_s, logits_t):
+    def forward(self, logits_s, logits_t, labels):
         """
         logits_s, logits_t: [N, C, P]
         直接在 logits 上做 MSE Loss
@@ -120,8 +126,11 @@ class LogitsKD_MSELoss(BaseLoss):
         return loss, self.info
 
 
-class LogitsKDLoss_KA_LSR(BaseLoss):
+class LogitsKD_KA_LSR(BaseLoss):
     """
+    "Preparing Lessons: Improve Knowledge Distillation with Better Supervision"
+    https://arxiv.org/abs/1911.07471
+    
     KA + LSR replacement for logits distillation, for gait logits [N, C, P].
     If teacher predicts wrong, replace teacher soft target with smoothed one-hot distribution.
     """
@@ -186,7 +195,7 @@ def _cat_mask(prob, gt_mask, other_mask):
     return torch.cat([p_gt, p_other], dim=1)
 
 
-class LogitsDKDLoss(BaseLoss):
+class LogitsKD_DKDLoss(BaseLoss):
     """
     DKD loss (Decoupled KD) for gait logits [N, C, P].
 
@@ -196,7 +205,7 @@ class LogitsDKDLoss(BaseLoss):
 
     def __init__(self, alpha=1.0, beta=1.0, T=4.0, scale=2**4,
                  loss_term_weight=1.0, eps=1e-12):
-        super(LogitsDKDLoss, self).__init__(loss_term_weight)
+        super(LogitsKD_DKDLoss, self).__init__(loss_term_weight)
         self.alpha = alpha
         self.beta = beta
         self.T = T
